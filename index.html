@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>加書到書單</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #1a1a1a; min-height: 100vh; }
+    .container { max-width: 480px; margin: 0 auto; padding: 24px 16px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 20px; text-align: center; }
+    .input-row { display: flex; gap: 8px; margin-bottom: 20px; }
+    input[type="text"] { flex: 1; padding: 12px 14px; border: 1.5px solid #ddd; border-radius: 10px; font-size: 15px; outline: none; transition: border-color .2s; }
+    input[type="text"]:focus { border-color: #555; }
+    button { padding: 12px 18px; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+    button:active { opacity: .7; }
+    #searchBtn { background: #1a1a1a; color: #fff; }
+    #addBtn { width: 100%; background: #2f7d32; color: #fff; font-size: 17px; padding: 15px; border-radius: 12px; margin-top: 16px; display: none; }
+
+    .card { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 1px 6px rgba(0,0,0,.08); display: none; }
+    .cover-row { display: flex; gap: 14px; margin-bottom: 14px; }
+    .cover-img { width: 90px; height: 120px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #eee; }
+    .cover-placeholder { width: 90px; height: 120px; border-radius: 6px; flex-shrink: 0; background: #eee; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 12px; }
+    .meta { flex: 1; }
+    .book-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; line-height: 1.4; }
+    .book-author { font-size: 13px; color: #555; margin-bottom: 6px; }
+    .book-link { font-size: 12px; color: #1a73e8; text-decoration: none; word-break: break-all; }
+
+    .field { margin-bottom: 12px; }
+    label { display: block; font-size: 12px; font-weight: 600; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+    .editable { width: 100%; border: 1.5px solid #eee; border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #1a1a1a; background: #fafafa; resize: vertical; outline: none; font-family: inherit; }
+    .editable:focus { border-color: #555; background: #fff; }
+
+    .status { text-align: center; padding: 12px; font-size: 14px; color: #555; }
+    .status.error { color: #c62828; }
+    .status.success { color: #2e7d32; font-weight: 600; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>📚 加書到書單</h1>
+
+  <div class="input-row">
+    <input type="text" id="urlInput" placeholder="貼入誠品書籍連結…" autocomplete="off" autocorrect="off" />
+    <button id="searchBtn" onclick="search()">查詢</button>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <div class="card" id="card">
+    <div class="cover-row">
+      <img id="coverImg" class="cover-img" style="display:none" />
+      <div id="coverPlaceholder" class="cover-placeholder">無封面</div>
+      <div class="meta">
+        <div class="book-title" id="titleDisplay"></div>
+        <div class="book-author" id="authorDisplay"></div>
+        <a class="book-link" id="linkDisplay" target="_blank"></a>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>書名</label>
+      <input class="editable" type="text" id="f_title" />
+    </div>
+    <div class="field">
+      <label>作者</label>
+      <input class="editable" type="text" id="f_author" />
+    </div>
+    <div class="field">
+      <label>類型</label>
+      <input class="editable" type="text" id="f_category" placeholder="例：商業, 心理" />
+    </div>
+    <div class="field">
+      <label>內容簡介</label>
+      <textarea class="editable" id="f_desc" rows="5"></textarea>
+    </div>
+    <div class="field">
+      <label>封面圖 URL</label>
+      <input class="editable" type="text" id="f_cover" />
+    </div>
+
+    <button id="addBtn" onclick="addToNotion()">加入書單 Notion</button>
+  </div>
+</div>
+
+<script>
+const CAT_MAP = {
+  "商業財經":["商業"],"經濟":["商業"],"管理":["商業"],"行銷":["商業"],"企業":["商業"],"創業":["商業"],
+  "理財":["財務"],"投資":["財務"],"金融":["財務"],
+  "心理勵志":["心理"],"大眾心理學":["心理"],"心理學":["心理"],
+  "科學":["科普"],"科普":["科普"],"數學":["科普"],"物理":["科普"],"生物":["科普"],"醫學":["科普"],"社會科學":["科普"],
+  "歷史":["傳記"],"傳記":["傳記"],"人文史哲":["傳記"],"哲學":["傳記"],
+  "文學":["小說"],"小說":["小說"],"散文":["小說"],"輕小說":["小說"],
+  "藝術設計":["藝術"],"建築":["藝術"],"設計":["藝術"],"電影":["藝術"],"音樂":["藝術"],"攝影":["藝術"],
+  "職場":["產業"],"產業":["產業"],
+};
+
+function inferCategory(paths) {
+  const joined = paths.join(" ");
+  const result = new Set();
+  for (const [key, cats] of Object.entries(CAT_MAP)) {
+    if (joined.includes(key)) cats.forEach(c => result.add(c));
+  }
+  return [...result].join(", ");
+}
+
+function extractProductId(url) {
+  const m = url.match(/eslite\.com\/product\/([^\/?#]+)/);
+  return m ? m[1] : null;
+}
+
+async function search() {
+  const raw = document.getElementById("urlInput").value.trim();
+  const pid = extractProductId(raw);
+  if (!pid) {
+    setStatus("請貼入正確的誠品書籍連結（eslite.com/product/...）", "error");
+    return;
+  }
+  setStatus("查詢中…");
+  document.getElementById("card").style.display = "none";
+  document.getElementById("addBtn").style.display = "none";
+
+  try {
+    const resp = await fetch(`/api/fetch-book?pid=${pid}`);
+    const book = await resp.json();
+    if (!resp.ok) throw new Error(book.error || "查詢失敗");
+
+    document.getElementById("f_title").value = book.title;
+    document.getElementById("f_author").value = book.author;
+    document.getElementById("f_desc").value = book.description;
+    document.getElementById("f_cover").value = book.cover || "";
+    document.getElementById("f_category").value = book.category;
+
+    document.getElementById("titleDisplay").textContent = book.title;
+    document.getElementById("authorDisplay").textContent = book.author;
+    document.getElementById("linkDisplay").textContent = book.link;
+    document.getElementById("linkDisplay").href = book.link;
+
+    if (book.cover) {
+      document.getElementById("coverImg").src = book.cover;
+      document.getElementById("coverImg").style.display = "block";
+      document.getElementById("coverPlaceholder").style.display = "none";
+    } else {
+      document.getElementById("coverImg").style.display = "none";
+      document.getElementById("coverPlaceholder").style.display = "flex";
+    }
+
+    document.getElementById("card").style.display = "block";
+    document.getElementById("addBtn").style.display = "block";
+    document.getElementById("addBtn").dataset.link = book.link;
+    setStatus("");
+  } catch (e) {
+    setStatus("查詢失敗：" + e.message, "error");
+  }
+}
+
+async function addToNotion() {
+  const btn = document.getElementById("addBtn");
+  btn.textContent = "新增中…";
+  btn.disabled = true;
+  setStatus("");
+
+  const body = {
+    title: document.getElementById("f_title").value.trim(),
+    author: document.getElementById("f_author").value.trim(),
+    description: document.getElementById("f_desc").value.trim(),
+    cover: document.getElementById("f_cover").value.trim() || null,
+    link: btn.dataset.link || null,
+    category: document.getElementById("f_category").value.trim(),
+  };
+
+  try {
+    const resp = await fetch("/api/notion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || "未知錯誤");
+    setStatus("成功加入書單！", "success");
+    btn.textContent = "✓ 已加入";
+    btn.style.background = "#1b5e20";
+  } catch (e) {
+    setStatus("新增失敗：" + e.message, "error");
+    btn.textContent = "加入書單 Notion";
+    btn.disabled = false;
+  }
+}
+
+function setStatus(msg, type = "") {
+  const el = document.getElementById("status");
+  el.textContent = msg;
+  el.className = "status" + (type ? " " + type : "");
+}
+
+document.getElementById("urlInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") search();
+});
+</script>
+</body>
+</html>
